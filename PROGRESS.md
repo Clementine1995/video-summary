@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-项目已经从需求文档推进到第 2 阶段原型。
+项目已经从需求文档推进到第 3 阶段基础原型。
 
 已完成：
 
@@ -16,21 +16,30 @@
 - 接入 `faster-whisper` 做本地 ASR 转写。
 - 对字幕/转写结果做轻量清洗：去重、合并短字幕、去除少量口头填充词。
 - 支持 DeepSeek、OpenAI、其他 OpenAI-compatible LLM 配置。
+- 支持长 transcript 自动分块、分块摘要和全局归纳。
+- `yt-dlp` 调用优先使用当前 Python 环境中的 `python -m yt_dlp`，减少 PATH/虚拟环境激活问题。
+- YouTube 字幕获取支持多个候选语言重试，避免单个语言字幕 429 或失败时直接中断。
 - 导出：
   - `summary.md`
   - `transcript.raw.md`
   - `transcript.cleaned.md`
+  - `chunk_summaries.md`（仅分块总结时生成）
   - `metadata.json`
 - 增加 `.gitignore`，忽略 `__pycache__`、`outputs/`、虚拟环境等本地产物。
 
 未完成：
 
-- 真实 YouTube + ASR + LLM 端到端测试尚未跑通，因为当前环境没有确认 API key、网络、ffmpeg、faster-whisper 模型下载状态。
+- 真实 YouTube + LLM 完整端到端导出尚未跑通，因为当前终端尚未配置 LLM API key。
+- 真实无字幕 YouTube + ASR 路径尚未端到端验证。
 - B站支持未开始。
 - 本地文件输入未开始。
-- 长视频分块总结未开始。
+- 真实 60 分钟以上长视频分块总结尚未端到端验证。
 - 批处理和 Web UI 未开始。
-- 当前改动尚未成功 git commit，原因是当前沙箱不允许写入 `.git/index.lock`。
+
+新增需求记录：
+
+- 后续增强中增加“说话人分离”：无字幕视频进入 ASR 流程时，可选识别不同说话人并标注 Speaker 1、Speaker 2。
+- 可选增加“声音类型辅助推测”：如疑似男声/疑似女声，但只能作为参考信息，不作为强准确字段。
 
 ## 重要文件
 
@@ -45,6 +54,7 @@
 - `src/video_summary/config.py`：LLM 和 ASR 配置。
 - `src/video_summary/llm.py`：OpenAI-compatible chat completions 调用。
 - `src/video_summary/cleaner.py`：文本清洗。
+- `src/video_summary/chunker.py`：长 transcript 分块。
 - `src/video_summary/exporter.py`：Markdown 和 metadata 导出。
 - `src/video_summary/models.py`：数据结构。
 - `src/video_summary/errors.py`：用户可读错误类型。
@@ -54,6 +64,9 @@
 安装：
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
 python -m pip install -e ".[all]"
 ```
 
@@ -93,7 +106,9 @@ CLI
       -> 成功：进入清洗
       -> 失败：download_youtube_audio -> transcribe_audio
   -> clean_segments
-  -> summarize_with_openai_compatible
+  -> summarize_with_chunking
+      -> 短 transcript：单次 LLM 总结
+      -> 长 transcript：分块摘要 -> 全局归纳
   -> export_result
 ```
 
@@ -155,8 +170,7 @@ python -m video_summary "URL" --asr-model small --asr-language zh
 
 ```powershell
 $env:PYTHONPATH='src'
-$env:PYTHONDONTWRITEBYTECODE='1'
-python -m compileall src
+python -c "import ast, pathlib; [ast.parse(p.read_text(encoding='utf-8'), filename=str(p)) for p in pathlib.Path('src').rglob('*.py')]; print('syntax ok')"
 ```
 
 通过：
@@ -186,6 +200,16 @@ python -m video_summary not-a-url
 处理失败：第 2 阶段仍只支持 YouTube 链接。B站和本地文件会在后续阶段加入。
 ```
 
+真实 YouTube 预检：
+
+- 用户在本机成功读取视频 `https://www.youtube.com/watch?v=gN9dlisaQVM` 的元数据。
+- 元数据结果：
+  - 标题：`TED 中英雙語字幕:  如何讓壓力成為你的朋友`
+  - 时长：`869` 秒
+- 首次字幕下载在 `zh-Hans` 上遇到 `HTTP Error 429: Too Many Requests`。
+- 已修复为多候选字幕语言重试；用户后续反馈“没报错了”。
+- 该预检命令只打印结果，不会生成 `outputs/`；完整导出仍需运行 `python -m video_summary ... --output outputs` 并配置 LLM API key。
+
 ## 回家继续前建议先做
 
 1. 确认文件完整同步到新电脑。
@@ -205,31 +229,20 @@ ffmpeg -version
 5. 找一个有字幕的短 YouTube 视频先测试字幕路径。
 6. 再找一个无字幕或字幕不可用的短视频测试 ASR 路径。
 
-## 建议提交命令
-
-当前这台电脑上提交被权限限制卡住了。换到正常终端后执行：
-
-```powershell
-cd F:\codex-project\video-summary
-git add .
-git commit -m "Implement YouTube summary CLI with ASR fallback"
-```
-
-如果回家路径不同，先进入项目目录再执行即可。
-
 ## 下一步开发建议
 
 优先顺序建议：
 
-1. 跑通一个真实 YouTube 有字幕视频端到端。
-2. 跑通一个真实 YouTube 无字幕视频 ASR 端到端。
-3. 修正真实运行中暴露的 `yt-dlp`、字幕格式、DeepSeek 返回格式、ASR 设备兼容问题。
-4. 开始第 3 阶段：长视频分块总结。
+1. 配置 DeepSeek 或 OpenAI-compatible API key。
+2. 跑通一个真实 YouTube 有字幕视频完整导出。
+3. 跑通一个真实 YouTube 无字幕视频 ASR 端到端。
+4. 修正真实运行中暴露的 `yt-dlp`、字幕格式、DeepSeek 返回格式、ASR 设备兼容问题。
+5. 使用 60 分钟以上视频验证长视频分块总结。
 
 第 3 阶段建议改动：
 
-- 增加 `chunker.py`。
-- 按 8-15 分钟或最大字符数切分 cleaned transcript。
-- 每个 chunk 单独调用 LLM 生成局部摘要。
-- 增加全局汇总 prompt，把 chunk summaries 去重归纳为最终 `summary.md`。
-- 导出 `chunks/` 或 `chunk_summaries.md`，方便调试和失败重试。
+- 已增加 `chunker.py`。
+- 已支持按目标分钟数或最大字符数切分 cleaned transcript。
+- 已支持每个 chunk 单独调用 LLM 生成局部摘要。
+- 已增加全局汇总 prompt，把 chunk summaries 去重归纳为最终 `summary.md`。
+- 已导出 `chunk_summaries.md`，方便调试和失败重试。

@@ -12,6 +12,22 @@ class Segment:
 
 
 @dataclass(slots=True)
+class TranscriptChunk:
+    index: int
+    start: float
+    end: float
+    segments: list[Segment]
+
+
+@dataclass(slots=True)
+class ChunkSummary:
+    index: int
+    start: float
+    end: float
+    markdown: str
+
+
+@dataclass(slots=True)
 class VideoMetadata:
     source_url: str
     source_type: str
@@ -33,3 +49,4 @@ class PipelineResult:
     raw_segments: list[Segment]
     cleaned_segments: list[Segment]
     summary_markdown: str
+    chunk_summaries: list[ChunkSummary] = field(default_factory=list)

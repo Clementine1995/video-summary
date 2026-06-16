@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 from .errors import SubtitleFetchError
 from .models import Segment, VideoMetadata
+from .utils import yt_dlp_command
 
 
 LANGUAGE_PREFERENCES = ("zh-Hans", "zh-CN", "zh", "en", "en-US", "en-GB")
 
 
-def fetch_youtube_subtitles(url: str, language_preferences: tuple[str, ...] = LANGUAGE_PREFERENCES) -> tuple[VideoMetadata, list[Segment]]:
-    if shutil.which("yt-dlp") is None:
+def fetch_youtube_subtitles(
+    url: str,
+    language_preferences: tuple[str, ...] = LANGUAGE_PREFERENCES,
+) -> tuple[VideoMetadata, list[Segment]]:
+    if yt_dlp_command() is None:
         raise SubtitleFetchError("未找到 yt-dlp。请先运行 `pip install yt-dlp`，或确保 yt-dlp 在 PATH 中。")
 
     metadata = probe_youtube_metadata(url)
@@ -25,25 +28,55 @@ def fetch_youtube_subtitles(url: str, language_preferences: tuple[str, ...] = LA
 
 
 def probe_youtube_metadata(url: str) -> VideoMetadata:
-    if shutil.which("yt-dlp") is None:
+    command_prefix = yt_dlp_command()
+    if command_prefix is None:
         raise SubtitleFetchError("未找到 yt-dlp。请先运行 `pip install yt-dlp`，或确保 yt-dlp 在 PATH 中。")
-    return _probe_metadata(url)
+    return _probe_metadata(command_prefix, url)
 
 
 def fetch_subtitles_for_metadata(
     metadata: VideoMetadata,
     language_preferences: tuple[str, ...] = LANGUAGE_PREFERENCES,
 ) -> list[Segment]:
+    info = metadata.extra.get("raw_info", {})
+    languages = _subtitle_language_candidates(info, language_preferences)
+    if not languages:
+        raise SubtitleFetchError("这个 YouTube 视频没有发现可用字幕。")
+
+    command_prefix = yt_dlp_command()
+    errors: list[str] = []
+    for language in languages:
+        try:
+            segments = _fetch_one_subtitle_language(command_prefix, metadata, language)
+        except SubtitleFetchError as exc:
+            errors.append(f"{language}: {exc}")
+            continue
+        if segments:
+            metadata.subtitle_language = language
+            metadata.subtitle_source = "yt-dlp"
+            metadata.transcript_source = "subtitle"
+            return segments
+        errors.append(f"{language}: 字幕文件为空")
+
+    detail = "；".join(errors[:5])
+    if len(errors) > 5:
+        detail += f"；另有 {len(errors) - 5} 个语言也失败"
+    raise SubtitleFetchError(f"字幕下载失败，已尝试 {len(languages)} 个语言。{detail}")
+
+
+def _fetch_one_subtitle_language(
+    command_prefix: list[str] | None,
+    metadata: VideoMetadata,
+    language: str,
+) -> list[Segment]:
+    if command_prefix is None:
+        raise SubtitleFetchError("未找到 yt-dlp。请先运行 `pip install yt-dlp`，或确保 yt-dlp 在 PATH 中。")
+
     with tempfile.TemporaryDirectory(prefix="video-summary-") as tmp:
         temp_dir = Path(tmp)
-        info = metadata.extra.get("raw_info", {})
-        language = _pick_subtitle_language(info, language_preferences)
-        if language is None:
-            raise SubtitleFetchError("这个 YouTube 视频没有发现可用字幕。第 1 阶段暂不做音频转写。")
-
         output_template = str(temp_dir / "subtitle.%(ext)s")
         command = [
-            "yt-dlp",
+            *command_prefix,
             "--skip-download",
             "--write-subs",
             "--write-auto-subs",
@@ -57,24 +90,21 @@ def fetch_subtitles_for_metadata(
         ]
         completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if completed.returncode != 0:
-            raise SubtitleFetchError(f"字幕下载失败：{completed.stderr.strip() or completed.stdout.strip()}")
+            raise SubtitleFetchError(completed.stderr.strip() or completed.stdout.strip())
 
         vtt_files = sorted(temp_dir.glob("subtitle*.vtt"))
         if not vtt_files:
-            raise SubtitleFetchError("yt-dlp 没有生成字幕文件。")
+            raise SubtitleFetchError("yt-dlp 没有生成字幕文件")
 
-        segments = parse_vtt(vtt_files[0].read_text(encoding="utf-8", errors="replace"), language)
-        if not segments:
-            raise SubtitleFetchError("字幕文件为空，无法继续总结。")
-
-        metadata.subtitle_language = language
-        metadata.subtitle_source = "yt-dlp"
-        metadata.transcript_source = "subtitle"
-        return segments
+        for vtt_file in vtt_files:
+            segments = parse_vtt(vtt_file.read_text(encoding="utf-8", errors="replace"), language)
+            if segments:
+                return segments
+    return []
 
 
-def _probe_metadata(url: str) -> VideoMetadata:
-    command = ["yt-dlp", "--dump-single-json", "--skip-download", url]
+def _probe_metadata(command_prefix: list[str], url: str) -> VideoMetadata:
+    command = [*command_prefix, "--dump-single-json", "--skip-download", url]
     completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if completed.returncode != 0:
         raise SubtitleFetchError(f"无法读取 YouTube 元数据：{completed.stderr.strip() or completed.stdout.strip()}")
@@ -94,22 +124,27 @@ def _probe_metadata(url: str) -> VideoMetadata:
     )
 
 
-def _pick_subtitle_language(info: dict[str, object], preferences: tuple[str, ...]) -> str | None:
+def _subtitle_language_candidates(info: dict[str, object], preferences: tuple[str, ...]) -> list[str]:
     manual = info.get("subtitles") if isinstance(info.get("subtitles"), dict) else {}
     automatic = info.get("automatic_captions") if isinstance(info.get("automatic_captions"), dict) else {}
     available = {**automatic, **manual}
     if not available:
-        return None
+        return []
+
+    candidates: list[str] = []
     for language in preferences:
         if language in available:
-            return language
+            candidates.append(language)
     for language in available:
-        if language.startswith("zh"):
-            return language
+        if language.startswith("zh") and language not in candidates:
+            candidates.append(language)
     for language in available:
-        if language.startswith("en"):
-            return language
-    return next(iter(available), None)
+        if language.startswith("en") and language not in candidates:
+            candidates.append(language)
+    for language in available:
+        if language not in candidates:
+            candidates.append(language)
+    return candidates
 
 
 TIMING_RE = re.compile(

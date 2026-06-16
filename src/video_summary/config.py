@@ -24,6 +24,12 @@ class ASRConfig:
     compute_type: str
 
 
+@dataclass(slots=True)
+class ChunkingConfig:
+    target_minutes: float
+    max_chars: int
+
+
 PROVIDER_DEFAULTS = {
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
@@ -95,4 +101,14 @@ def load_asr_config(
         language=resolved_language,
         device=device or os.getenv("VIDEO_SUMMARY_ASR_DEVICE", "auto"),
         compute_type=compute_type or os.getenv("VIDEO_SUMMARY_ASR_COMPUTE_TYPE", "default"),
+    )
+
+
+def load_chunking_config(
+    target_minutes: float | None = None,
+    max_chars: int | None = None,
+) -> ChunkingConfig:
+    return ChunkingConfig(
+        target_minutes=target_minutes or float(os.getenv("VIDEO_SUMMARY_CHUNK_TARGET_MINUTES", "12")),
+        max_chars=max_chars or int(os.getenv("VIDEO_SUMMARY_CHUNK_MAX_CHARS", "30000")),
     )

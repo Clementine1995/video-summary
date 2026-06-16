@@ -1,6 +1,6 @@
 # video-summary
 
-个人使用的视频内容总结工具。当前实现到第 2 阶段：输入 YouTube 链接后，优先获取字幕；如果字幕不可用，会下载音频并使用本地 `faster-whisper` 转写，再调用 OpenAI-compatible LLM 导出 Markdown 总结。
+个人使用的视频内容总结工具。当前实现到第 3 阶段基础原型：输入 YouTube 链接后，优先获取字幕；如果字幕不可用，会下载音频并使用本地 `faster-whisper` 转写。短 transcript 会直接调用 OpenAI-compatible LLM 总结，长 transcript 会先分块摘要，再全局归纳并导出 Markdown。
 
 ## 准备
 
@@ -55,6 +55,15 @@ $env:VIDEO_SUMMARY_ASR_DEVICE="auto"
 $env:VIDEO_SUMMARY_ASR_MODEL="small"
 ```
 
+## 配置分块
+
+默认长 transcript 按约 12 分钟或 30000 字符切分：
+
+```powershell
+$env:VIDEO_SUMMARY_CHUNK_TARGET_MINUTES="12"
+$env:VIDEO_SUMMARY_CHUNK_MAX_CHARS="30000"
+```
+
 ## 使用
 
 ```powershell
@@ -67,11 +76,18 @@ python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs
 python -m video_summary "https://www.youtube.com/watch?v=..." --llm-provider deepseek --llm-model deepseek-chat --asr-model small
 ```
 
+长视频分块参数也可以临时覆盖：
+
+```powershell
+python -m video_summary "https://www.youtube.com/watch?v=..." --chunk-target-minutes 10 --chunk-max-chars 25000
+```
+
 每次成功运行会生成一个独立目录，包含：
 
 - `summary.md`
 - `transcript.raw.md`
 - `transcript.cleaned.md`
+- `chunk_summaries.md`（仅长视频触发分块总结时生成）
 - `metadata.json`
 
 如果进入 ASR 流程，下载后的音频会保留在 `outputs/_work/`，方便转写失败后重试。
@@ -82,6 +98,7 @@ python -m video_summary "https://www.youtube.com/watch?v=..." --llm-provider dee
 - 优先使用视频已有字幕或自动字幕
 - 字幕不可用时使用 `yt-dlp` + `ffmpeg` 提取音频
 - 使用 `faster-whisper` 本地转写
+- 长 transcript 会按时间或字符数分块总结，再做全局归纳
 - 处理失败时给出可读错误信息
 
-B站、本地文件、长视频分块总结和 Web UI 会在后续阶段加入。
+B站、本地文件、批处理和 Web UI 会在后续阶段加入。

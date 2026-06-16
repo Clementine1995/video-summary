@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import re
+import shutil
+import sys
 from pathlib import Path
 
 
@@ -42,3 +45,12 @@ def unique_dir(base: Path, stem: str) -> Path:
         if not candidate.exists():
             return candidate
         index += 1
+
+
+def yt_dlp_command() -> list[str] | None:
+    if importlib.util.find_spec("yt_dlp") is not None:
+        return [sys.executable, "-m", "yt_dlp"]
+    executable = shutil.which("yt-dlp")
+    if executable is not None:
+        return [executable]
+    return None

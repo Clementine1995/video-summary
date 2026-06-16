@@ -7,10 +7,10 @@ from pathlib import Path
 
 from .audio import download_youtube_audio
 from .cleaner import clean_segments
-from .config import load_asr_config, load_llm_config
+from .config import load_asr_config, load_chunking_config, load_llm_config
 from .errors import SubtitleFetchError, UnsupportedInputError, VideoSummaryError
 from .exporter import export_result
-from .llm import summarize_with_openai_compatible
+from .llm import summarize_with_chunking
 from .models import PipelineResult
 from .transcriber import transcribe_audio
 from .utils import is_youtube_url
@@ -33,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--asr-language", help="ASR language code, such as zh/en. Default: auto.")
     parser.add_argument("--asr-device", help="ASR device, such as auto/cpu/cuda. Default: auto.")
     parser.add_argument("--asr-compute-type", help="faster-whisper compute type. Default: default.")
+    parser.add_argument("--chunk-target-minutes", type=float, help="Target minutes per chunk for long videos. Default: 12.")
+    parser.add_argument("--chunk-max-chars", type=int, help="Maximum transcript characters per chunk. Default: 30000.")
     parser.add_argument("--debug", action="store_true", help="Print technical traceback when a step fails.")
     return parser
 
@@ -83,9 +85,15 @@ def main(argv: list[str] | None = None) -> int:
             model=args.llm_model,
             api_key=args.llm_api_key,
         )
-        summary = summarize_with_openai_compatible(metadata, cleaned_segments, llm_config)
+        chunking_config = load_chunking_config(
+            target_minutes=args.chunk_target_minutes,
+            max_chars=args.chunk_max_chars,
+        )
+        summary, chunk_summaries = summarize_with_chunking(metadata, cleaned_segments, llm_config, chunking_config)
+        if chunk_summaries:
+            metadata.extra["chunk_count"] = len(chunk_summaries)
 
-        result = PipelineResult(metadata, raw_segments, cleaned_segments, summary)
+        result = PipelineResult(metadata, raw_segments, cleaned_segments, summary, chunk_summaries)
         output_dir = export_result(result, Path(args.output))
         print("5/5 Markdown 导出完成。")
         print(f"输出目录：{output_dir.resolve()}")

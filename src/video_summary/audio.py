@@ -6,11 +6,12 @@ from pathlib import Path
 
 from .errors import AudioExtractionError
 from .models import VideoMetadata
-from .utils import slugify, unique_dir
+from .utils import slugify, unique_dir, yt_dlp_command
 
 
 def download_youtube_audio(metadata: VideoMetadata, work_root: Path, sample_rate: int = 16000) -> Path:
-    if shutil.which("yt-dlp") is None:
+    command_prefix = yt_dlp_command()
+    if command_prefix is None:
         raise AudioExtractionError("未找到 yt-dlp，无法下载音频。请先安装 yt-dlp。")
     if shutil.which("ffmpeg") is None:
         raise AudioExtractionError("未找到 ffmpeg，无法转换音频。请先安装 ffmpeg 并确保它在 PATH 中。")
@@ -20,7 +21,7 @@ def download_youtube_audio(metadata: VideoMetadata, work_root: Path, sample_rate
     job_dir.mkdir(parents=True)
     output_template = str(job_dir / "audio.%(ext)s")
     command = [
-        "yt-dlp",
+        *command_prefix,
         "--no-playlist",
         "--extract-audio",
         "--audio-format",

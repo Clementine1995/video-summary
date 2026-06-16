@@ -5,7 +5,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import PipelineResult, Segment, VideoMetadata
+from .models import ChunkSummary, PipelineResult, Segment, VideoMetadata
 from .utils import format_timestamp, slugify, unique_dir
 
 
@@ -17,6 +17,8 @@ def export_result(result: PipelineResult, output_root: Path) -> Path:
     (output_dir / "summary.md").write_text(result.summary_markdown, encoding="utf-8")
     (output_dir / "transcript.raw.md").write_text(render_transcript(result.metadata, result.raw_segments), encoding="utf-8")
     (output_dir / "transcript.cleaned.md").write_text(render_transcript(result.metadata, result.cleaned_segments), encoding="utf-8")
+    if result.chunk_summaries:
+        (output_dir / "chunk_summaries.md").write_text(render_chunk_summaries(result.metadata, result.chunk_summaries), encoding="utf-8")
     (output_dir / "metadata.json").write_text(render_metadata(result.metadata, result.raw_segments, result.cleaned_segments), encoding="utf-8")
     return output_dir
 
@@ -43,3 +45,23 @@ def render_metadata(metadata: VideoMetadata, raw_segments: list[Segment], cleane
     payload["raw_segment_count"] = len(raw_segments)
     payload["cleaned_segment_count"] = len(cleaned_segments)
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def render_chunk_summaries(metadata: VideoMetadata, chunk_summaries: list[ChunkSummary]) -> str:
+    lines = [
+        f"# {metadata.title} - 分段摘要",
+        "",
+        f"- Source: {metadata.webpage_url or metadata.source_url}",
+        f"- Chunk count: {len(chunk_summaries)}",
+        "",
+    ]
+    for summary in chunk_summaries:
+        lines.extend(
+            [
+                f"## Chunk {summary.index}: {format_timestamp(summary.start)} - {format_timestamp(summary.end)}",
+                "",
+                summary.markdown.strip(),
+                "",
+            ]
+        )
+    return "\n".join(lines)
