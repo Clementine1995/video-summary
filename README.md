@@ -54,6 +54,16 @@ base_url = "https://example.com/v1"
 model = "your-model-name"
 ```
 
+阿里云百炼兼容模式示例：
+
+```toml
+[llm]
+provider = "openai_compatible"
+api_key = "你的百炼 API key"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+model = "deepseek-v4-flash"
+```
+
 `config.local.toml` 是本地私密文件，已被 `.gitignore` 忽略，不会被提交。命令行参数和环境变量仍然可用，并且优先级高于配置文件。也可以用 `VIDEO_SUMMARY_CONFIG` 指定其他配置文件路径。
 
 ## 配置 ASR
@@ -152,4 +162,8 @@ python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs -
 - 长 transcript 会按时间或字符数分块总结，再做全局归纳
 - 处理失败时给出可读错误信息
 
-B站、本地文件、批处理和 Web UI 会在后续阶段加入。
+B站当前环境可能需要手动导出的 `cookies.txt`。本地文件、批处理和 Web UI 会在后续阶段加入。
+
+## 继续开发
+
+换电脑或回家继续时，优先看 [CONTINUE.md](CONTINUE.md)。

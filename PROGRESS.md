@@ -80,11 +80,14 @@
 
 - `video-summary-dev-requirements.md`：原始需求文档。
 - `README.md`：当前安装、配置和使用说明。
+- `CONTINUE.md`：换电脑或回家继续开发的接续手册。
 - `pyproject.toml`：项目配置和可选依赖。
 - `.gitignore`：忽略 Python 缓存、输出目录、虚拟环境。
 - `src/video_summary/cli.py`：命令行入口和主流程。
-- `src/video_summary/youtube.py`：YouTube 元数据和字幕获取。
-- `src/video_summary/audio.py`：YouTube 音频下载与 ffmpeg 转换。
+- `src/video_summary/youtube.py`：基于 yt-dlp 的视频元数据和字幕获取；当前支持 YouTube / B站 MVP。
+- `src/video_summary/audio.py`：视频音频下载与 ffmpeg 转换。
+- `src/video_summary/cache.py`：`--resume` 所需的 transcript / chunk summary 缓存读取。
+- `src/video_summary/run_state.py`：`run_state.json` 运行状态记录。
 - `src/video_summary/transcriber.py`：`faster-whisper` 转写。
 - `src/video_summary/config.py`：LLM 和 ASR 配置。
 - `src/video_summary/llm.py`：OpenAI-compatible chat completions 调用。
@@ -105,18 +108,22 @@ python -m pip install -U pip
 python -m pip install -e ".[all]"
 ```
 
-还需要本机安装并配置好：
+项目会优先使用系统 `ffmpeg`；如果没有系统 `ffmpeg`，会使用 `imageio-ffmpeg` 提供的内置可执行文件。
 
-- `ffmpeg`
-- 可访问 YouTube 的网络环境
-- DeepSeek 或 OpenAI-compatible API key
-
-推荐先用 DeepSeek：
+推荐使用本地配置文件：
 
 ```powershell
-$env:DEEPSEEK_API_KEY="你的 DeepSeek key"
-$env:VIDEO_SUMMARY_LLM_PROVIDER="deepseek"
-$env:VIDEO_SUMMARY_LLM_MODEL="deepseek-chat"
+Copy-Item config.example.toml config.local.toml
+```
+
+阿里云百炼 OpenAI-compatible 示例：
+
+```toml
+[llm]
+provider = "openai_compatible"
+api_key = "你的百炼 API key"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+model = "deepseek-v4-flash"
 ```
 
 如果机器配置一般，可以先用小 ASR 模型：
@@ -135,51 +142,39 @@ python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs -
 
 ```text
 CLI
-  -> 校验 YouTube URL
-  -> probe_youtube_metadata
+  -> 校验 YouTube / B站 URL
+  -> probe_video_metadata
+  -> 如果 --resume 且已有输出目录：复用 transcript 和 chunk summaries
   -> fetch_subtitles_for_metadata
       -> 成功：进入清洗
-      -> 失败：download_youtube_audio -> transcribe_audio
+      -> 失败：download_video_audio -> transcribe_audio
   -> clean_segments
+  -> 写入 transcript / metadata 缓存
   -> summarize_with_chunking
       -> 短 transcript：单次 LLM 总结
-      -> 长 transcript：分块摘要 -> 全局归纳
+      -> 长 transcript：分块摘要 -> chunk_summaries.md -> 全局归纳
   -> export_result
+  -> 写入 run_state.json
 ```
 
 ## LLM 配置口子
 
-默认 provider 是 `deepseek`。
+推荐使用 `config.local.toml`。命令行参数和环境变量仍可覆盖配置文件。
 
-DeepSeek：
+阿里云百炼：
 
-```powershell
-$env:DEEPSEEK_API_KEY="..."
-$env:VIDEO_SUMMARY_LLM_PROVIDER="deepseek"
-$env:VIDEO_SUMMARY_LLM_MODEL="deepseek-chat"
-```
-
-OpenAI：
-
-```powershell
-$env:OPENAI_API_KEY="..."
-$env:VIDEO_SUMMARY_LLM_PROVIDER="openai"
-$env:VIDEO_SUMMARY_LLM_MODEL="gpt-4.1-mini"
-```
-
-任意 OpenAI-compatible：
-
-```powershell
-$env:VIDEO_SUMMARY_LLM_PROVIDER="openai_compatible"
-$env:VIDEO_SUMMARY_LLM_API_KEY="..."
-$env:VIDEO_SUMMARY_LLM_BASE_URL="https://example.com/v1"
-$env:VIDEO_SUMMARY_LLM_MODEL="your-model"
+```toml
+[llm]
+provider = "openai_compatible"
+api_key = "..."
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+model = "deepseek-v4-flash"
 ```
 
 也可以用 CLI 参数临时覆盖：
 
 ```powershell
-python -m video_summary "URL" --llm-provider deepseek --llm-model deepseek-chat
+python -m video_summary "URL" --llm-provider openai_compatible --llm-model deepseek-v4-flash
 ```
 
 ## ASR 配置口子
@@ -260,9 +255,10 @@ python -m pip install -e ".[all]"
 ffmpeg -version
 ```
 
-4. 配置 DeepSeek key。
-5. 找一个有字幕的短 YouTube 视频先测试字幕路径。
-6. 再找一个无字幕或字幕不可用的短视频测试 ASR 路径。
+4. 配置 `config.local.toml`。
+5. 运行单元测试：`python -m unittest discover -s tests`。
+6. 先用 `--resume` 跑 CS50 长视频，确认 LLM 配置可用。
+7. 如果要继续 B站，准备手动导出的 `cookies.txt`。
 
 ## 下一步开发建议
 
@@ -276,11 +272,15 @@ ffmpeg -version
 
 以上 1-5 已完成。下一步建议优先做：
 
-1. 增强缓存控制：
+1. B站真实端到端验证：
+   - 用户手动提供 `cookies.txt`。
+   - 验证 B站字幕路径。
+   - 如果字幕不可用，验证 B站 ASR fallback。
+2. 增强缓存控制：
    - 支持强制重跑全部 chunk。
    - 支持只重跑指定 chunk。
    - 支持复用最终 `summary.md`。
-2. 再考虑 B站支持或本地文件输入。
+3. 再考虑本地文件输入。
 
 第 3 阶段建议改动：
 
