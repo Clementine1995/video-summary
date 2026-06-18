@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from video_summary.cache import load_cached_chunk_summaries, parse_transcript
+from video_summary.cache import load_cached_chunk_summaries, load_cached_summary, parse_transcript
 
 
 class CacheTests(unittest.TestCase):
@@ -59,6 +59,15 @@ chunk two
         self.assertEqual(summaries[0].end, 720)
         self.assertEqual(summaries[0].markdown, "chunk one")
         self.assertEqual(summaries[1].markdown, "chunk two")
+
+    def test_load_cached_summary(self):
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "summary.md"
+            path.write_text("\n# Summary\n\nbody\n", encoding="utf-8")
+
+            summary = load_cached_summary(path)
+
+        self.assertEqual(summary, "# Summary\n\nbody")
 
 
 if __name__ == "__main__":

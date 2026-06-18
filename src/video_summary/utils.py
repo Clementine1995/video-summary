@@ -9,6 +9,20 @@ from pathlib import Path
 
 YOUTUBE_HOST_RE = re.compile(r"(^|\.)youtube\.com$|(^|\.)youtu\.be$")
 BILIBILI_HOST_RE = re.compile(r"(^|\.)bilibili\.com$|(^|\.)b23\.tv$")
+LOCAL_MEDIA_EXTENSIONS = {
+    ".aac",
+    ".flac",
+    ".m4a",
+    ".mkv",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".webm",
+    ".wma",
+}
 
 
 def is_youtube_url(value: str) -> bool:
@@ -27,6 +41,10 @@ def is_bilibili_url(value: str) -> bool:
 
 def is_supported_video_url(value: str) -> bool:
     return is_youtube_url(value) or is_bilibili_url(value)
+
+
+def is_supported_local_media_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in LOCAL_MEDIA_EXTENSIONS
 
 
 def format_timestamp(seconds: float | None) -> str:

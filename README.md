@@ -1,6 +1,6 @@
 # video-summary
 
-个人使用的视频内容总结工具。当前实现到第 3 阶段基础原型：输入 YouTube 链接后，优先获取字幕；如果字幕不可用，会下载音频并使用本地 `faster-whisper` 转写。短 transcript 会直接调用 OpenAI-compatible LLM 总结，长 transcript 会先分块摘要，再全局归纳并导出 Markdown。
+个人使用的视频内容总结工具。支持 YouTube、B站和本地音视频文件：优先获取平台字幕；字幕不可用或输入为本地文件时，会用 `ffmpeg` 提取音频并通过 `faster-whisper` 本地转写。短 transcript 直接调用 OpenAI-compatible LLM 总结，长 transcript 会先分块摘要，再全局归纳并导出 Markdown。
 
 ## 准备
 
@@ -95,37 +95,107 @@ target_minutes = 12
 max_chars = 30000
 ```
 
-## 使用
+## 命令速查
+
+进入项目目录：
+
+```powershell
+cd E:\workspace\video-summary
+```
+
+创建并启用虚拟环境：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+安装依赖：
+
+```powershell
+python -m pip install -U pip
+python -m pip install -e ".[all]"
+```
+
+查看帮助：
+
+```powershell
+python -m video_summary --help
+```
+
+YouTube 有字幕视频：
 
 ```powershell
 python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs
 ```
 
-也支持 B站公开视频链接：
+已验证样例：
+
+```powershell
+python -m video_summary "https://www.youtube.com/watch?v=gN9dlisaQVM" --output outputs
+```
+
+YouTube 无字幕视频，走 ASR：
+
+```powershell
+python -m video_summary "https://www.youtube.com/watch?v=ARMSVQU7Qj8" --output outputs --asr-model small
+```
+
+长视频：
+
+```powershell
+python -m video_summary "https://www.youtube.com/watch?v=UuIEbpQms8o" --output outputs
+```
+
+长视频续跑：
+
+```powershell
+python -m video_summary "https://www.youtube.com/watch?v=UuIEbpQms8o" --output outputs --resume
+```
+
+B站公开视频：
 
 ```powershell
 python -m video_summary "https://www.bilibili.com/video/BV..." --output outputs
 ```
 
-如果 B站返回 412、登录限制或需要会员/地区权限，可以手动导出 `cookies.txt` 后传入：
+B站需要登录态、返回 412、会员/地区权限时，手动导出 `cookies.txt` 后传入：
 
 ```powershell
 python -m video_summary "https://www.bilibili.com/video/BV..." --output outputs --cookies path\to\cookies.txt
 ```
 
-也可以临时从命令行覆盖模型配置：
+B站已验证样例：
+
+```powershell
+python -m video_summary "https://www.bilibili.com/video/BV1GY4y1U7oq" --output outputs --cookies bilibili.cookies.txt --asr-model small
+```
+
+本地音视频文件：
+
+```powershell
+python -m video_summary "D:\videos\meeting.mp4" --output outputs --asr-model small
+```
+
+临时覆盖 LLM：
 
 ```powershell
 python -m video_summary "https://www.youtube.com/watch?v=..." --llm-provider deepseek --llm-model deepseek-v4-flash --asr-model small
 ```
 
-长视频分块参数也可以临时覆盖：
+临时覆盖 ASR：
+
+```powershell
+python -m video_summary "D:\videos\meeting.mp4" --output outputs --asr-model small --asr-language zh
+```
+
+临时覆盖分块参数：
 
 ```powershell
 python -m video_summary "https://www.youtube.com/watch?v=..." --chunk-target-minutes 10 --chunk-max-chars 25000
 ```
 
-如果长视频中途失败，或想复用已经生成的 transcript / chunk summaries，可以加 `--resume`：
+复用 transcript 和 chunk summaries：
 
 ```powershell
 python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs --resume
@@ -138,6 +208,44 @@ python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs -
 - `chunk_summaries.md`
 
 每个新 chunk 完成后会立刻写入 `chunk_summaries.md`，因此 LLM 在中途失败时，下次可以从未完成的 chunk 继续。
+
+缓存控制：
+
+```powershell
+python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs --resume --reuse-summary
+```
+
+```powershell
+python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs --resume --force-chunks
+```
+
+```powershell
+python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs --resume --rerun-chunk 2
+```
+
+只重跑多个 chunk：
+
+```powershell
+python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs --resume --rerun-chunk 2 --rerun-chunk 4
+```
+
+运行测试：
+
+```powershell
+python -m unittest discover -s tests
+```
+
+语法检查：
+
+```powershell
+python -c "import ast, pathlib; [ast.parse(p.read_text(encoding='utf-8'), filename=str(p)) for p in pathlib.Path('src').rglob('*.py')]; [ast.parse(p.read_text(encoding='utf-8'), filename=str(p)) for p in pathlib.Path('tests').rglob('*.py')]; print('syntax ok')"
+```
+
+检查不要提交本地私密文件和产物：
+
+```powershell
+git status --short --ignored
+```
 
 每次成功运行会生成一个独立目录，包含：
 
@@ -156,14 +264,11 @@ python -m video_summary "https://www.youtube.com/watch?v=..." --output outputs -
 
 - 支持 YouTube 链接
 - 支持 B站公开视频链接 MVP：优先字幕，字幕不可用时走 ASR
+- 支持本地音视频文件：直接走 ffmpeg + ASR
 - 优先使用视频已有字幕或自动字幕
 - 字幕不可用时使用 `yt-dlp` + `ffmpeg` 提取音频
 - 使用 `faster-whisper` 本地转写
 - 长 transcript 会按时间或字符数分块总结，再做全局归纳
 - 处理失败时给出可读错误信息
 
-B站当前环境可能需要手动导出的 `cookies.txt`。本地文件、批处理和 Web UI 会在后续阶段加入。
-
-## 继续开发
-
-换电脑或回家继续时，优先看 [CONTINUE.md](CONTINUE.md)。
+B站当前环境可能需要手动导出的 `cookies.txt`。批处理和 Web UI 会在后续阶段加入。

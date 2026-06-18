@@ -56,6 +56,62 @@ def download_youtube_audio(metadata: VideoMetadata, work_root: Path, sample_rate
     return download_video_audio(metadata, work_root, sample_rate)
 
 
+def extract_local_audio(
+    metadata: VideoMetadata,
+    input_path: Path,
+    work_root: Path,
+    sample_rate: int = 16000,
+) -> Path:
+    ffmpeg_location = _find_ffmpeg()
+    if ffmpeg_location is None:
+        raise AudioExtractionError("未找到 ffmpeg，无法转换本地音频。请先安装 ffmpeg，或运行 `python -m pip install -e \".[asr]\"`。")
+
+    work_root.mkdir(parents=True, exist_ok=True)
+    job_dir = unique_dir(work_root, slugify(metadata.title))
+    job_dir.mkdir(parents=True)
+    audio_path = job_dir / "audio.wav"
+    command = [
+        ffmpeg_location,
+        "-y",
+        "-i",
+        str(input_path),
+        "-vn",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        "1",
+        str(audio_path),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if completed.returncode != 0:
+        raise AudioExtractionError(f"本地音频转换失败：{completed.stderr.strip() or completed.stdout.strip()}")
+    metadata.audio_path = str(audio_path)
+    return audio_path
+
+
+def probe_media_duration(input_path: Path) -> float | None:
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        return None
+    command = [
+        ffprobe,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(input_path),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if completed.returncode != 0:
+        return None
+    try:
+        return float(completed.stdout.strip())
+    except ValueError:
+        return None
+
+
 def _find_ffmpeg() -> str | None:
     executable = shutil.which("ffmpeg")
     if executable is not None:

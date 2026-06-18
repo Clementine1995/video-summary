@@ -91,6 +91,13 @@ def load_cached_chunk_summaries(path: Path) -> list[ChunkSummary]:
     return [summary for summary in summaries if summary.markdown]
 
 
+def load_cached_summary(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    summary = path.read_text(encoding="utf-8").strip()
+    return summary or None
+
+
 def parse_timestamp(value: str) -> float:
     parts = [int(part) for part in value.split(":")]
     if len(parts) == 2:

@@ -47,7 +47,7 @@ def fetch_subtitles_for_metadata(
     info = metadata.extra.get("raw_info", {})
     languages = _subtitle_language_candidates(info, language_preferences)
     if not languages:
-        raise SubtitleFetchError("这个 YouTube 视频没有发现可用字幕。")
+        raise SubtitleFetchError(f"这个{_source_label(metadata.source_type)}视频没有发现可用字幕。")
 
     command_prefix = yt_dlp_command()
     errors: list[str] = []
@@ -176,6 +176,14 @@ def _source_type_from_extractor(extractor: str) -> str:
     if "youtube" in value:
         return "youtube"
     return "video"
+
+
+def _source_label(source_type: str) -> str:
+    if source_type == "bilibili":
+        return " B站"
+    if source_type == "youtube":
+        return " YouTube"
+    return ""
 
 
 TIMING_RE = re.compile(

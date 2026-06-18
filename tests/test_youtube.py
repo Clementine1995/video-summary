@@ -1,6 +1,8 @@
 import unittest
 
-from video_summary.youtube import parse_json_subtitle, parse_vtt
+from video_summary.errors import SubtitleFetchError
+from video_summary.models import VideoMetadata
+from video_summary.youtube import fetch_subtitles_for_metadata, parse_json_subtitle, parse_vtt
 
 
 class YoutubeTests(unittest.TestCase):
@@ -54,6 +56,21 @@ repeat
         self.assertEqual(segments[0].end, 3.4)
         self.assertEqual(segments[0].text, "第一句")
         self.assertEqual(segments[1].text, "第二句 & 内容")
+
+    def test_bilibili_without_subtitles_uses_bilibili_wording(self):
+        metadata = VideoMetadata(
+            source_url="https://www.bilibili.com/video/BV1",
+            source_type="bilibili",
+            title="Demo",
+            webpage_url="https://www.bilibili.com/video/BV1",
+            extra={"raw_info": {}},
+        )
+
+        with self.assertRaises(SubtitleFetchError) as context:
+            fetch_subtitles_for_metadata(metadata)
+
+        self.assertIn("B站视频没有发现可用字幕", str(context.exception))
+        self.assertNotIn("YouTube", str(context.exception))
 
 
 if __name__ == "__main__":
