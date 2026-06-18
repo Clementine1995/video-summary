@@ -11,32 +11,38 @@ from .models import Segment, VideoMetadata
 from .utils import yt_dlp_command
 
 
-LANGUAGE_PREFERENCES = ("zh-Hans", "zh-CN", "zh", "en", "en-US", "en-GB")
+LANGUAGE_PREFERENCES = ("zh-Hans", "zh-CN", "zh", "zh-Hant", "en", "en-US", "en-GB")
 
 
 def fetch_youtube_subtitles(
     url: str,
     language_preferences: tuple[str, ...] = LANGUAGE_PREFERENCES,
+    yt_dlp_extra_args: list[str] | None = None,
 ) -> tuple[VideoMetadata, list[Segment]]:
     if yt_dlp_command() is None:
         raise SubtitleFetchError("未找到 yt-dlp。请先运行 `pip install yt-dlp`，或确保 yt-dlp 在 PATH 中。")
 
-    metadata = probe_youtube_metadata(url)
-    segments = fetch_subtitles_for_metadata(metadata, language_preferences)
+    metadata = probe_youtube_metadata(url, yt_dlp_extra_args)
+    segments = fetch_subtitles_for_metadata(metadata, language_preferences, yt_dlp_extra_args)
     metadata.extra.pop("raw_info", None)
     return metadata, segments
 
 
-def probe_youtube_metadata(url: str) -> VideoMetadata:
+def probe_youtube_metadata(url: str, yt_dlp_extra_args: list[str] | None = None) -> VideoMetadata:
+    return probe_video_metadata(url, yt_dlp_extra_args)
+
+
+def probe_video_metadata(url: str, yt_dlp_extra_args: list[str] | None = None) -> VideoMetadata:
     command_prefix = yt_dlp_command()
     if command_prefix is None:
         raise SubtitleFetchError("未找到 yt-dlp。请先运行 `pip install yt-dlp`，或确保 yt-dlp 在 PATH 中。")
-    return _probe_metadata(command_prefix, url)
+    return _probe_metadata(command_prefix, url, yt_dlp_extra_args or [])
 
 
 def fetch_subtitles_for_metadata(
     metadata: VideoMetadata,
     language_preferences: tuple[str, ...] = LANGUAGE_PREFERENCES,
+    yt_dlp_extra_args: list[str] | None = None,
 ) -> list[Segment]:
     info = metadata.extra.get("raw_info", {})
     languages = _subtitle_language_candidates(info, language_preferences)
@@ -47,7 +53,7 @@ def fetch_subtitles_for_metadata(
     errors: list[str] = []
     for language in languages:
         try:
-            segments = _fetch_one_subtitle_language(command_prefix, metadata, language)
+            segments = _fetch_one_subtitle_language(command_prefix, metadata, language, yt_dlp_extra_args)
         except SubtitleFetchError as exc:
             errors.append(f"{language}: {exc}")
             continue
@@ -68,6 +74,7 @@ def _fetch_one_subtitle_language(
     command_prefix: list[str] | None,
     metadata: VideoMetadata,
     language: str,
+    yt_dlp_extra_args: list[str] | None = None,
 ) -> list[Segment]:
     if command_prefix is None:
         raise SubtitleFetchError("未找到 yt-dlp。请先运行 `pip install yt-dlp`，或确保 yt-dlp 在 PATH 中。")
@@ -77,13 +84,14 @@ def _fetch_one_subtitle_language(
         output_template = str(temp_dir / "subtitle.%(ext)s")
         command = [
             *command_prefix,
+            *(yt_dlp_extra_args or []),
             "--skip-download",
             "--write-subs",
             "--write-auto-subs",
             "--sub-langs",
             language,
             "--sub-format",
-            "vtt",
+            "vtt/srt/json/best",
             "-o",
             output_template,
             metadata.webpage_url or metadata.source_url,
@@ -92,35 +100,49 @@ def _fetch_one_subtitle_language(
         if completed.returncode != 0:
             raise SubtitleFetchError(completed.stderr.strip() or completed.stdout.strip())
 
-        vtt_files = sorted(temp_dir.glob("subtitle*.vtt"))
-        if not vtt_files:
+        subtitle_files = sorted(path for path in temp_dir.glob("subtitle*.*") if path.is_file())
+        if not subtitle_files:
             raise SubtitleFetchError("yt-dlp 没有生成字幕文件")
 
-        for vtt_file in vtt_files:
-            segments = parse_vtt(vtt_file.read_text(encoding="utf-8", errors="replace"), language)
+        for subtitle_file in subtitle_files:
+            segments = parse_subtitle(
+                subtitle_file.read_text(encoding="utf-8", errors="replace"),
+                language,
+                subtitle_file.suffix.lower(),
+            )
             if segments:
                 return segments
     return []
 
 
-def _probe_metadata(command_prefix: list[str], url: str) -> VideoMetadata:
-    command = [*command_prefix, "--dump-single-json", "--skip-download", url]
+def _probe_metadata(command_prefix: list[str], url: str, yt_dlp_extra_args: list[str]) -> VideoMetadata:
+    command = [*command_prefix, *yt_dlp_extra_args, "--dump-single-json", "--skip-download", url]
     completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if completed.returncode != 0:
-        raise SubtitleFetchError(f"无法读取 YouTube 元数据：{completed.stderr.strip() or completed.stdout.strip()}")
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        if "HTTP Error 412" in detail and "bilibili.com" in url:
+            detail += "。B站可能要求登录 cookie；请手动导出 cookies.txt 后使用 `--cookies path\\to\\cookies.txt`。"
+        raise SubtitleFetchError(f"无法读取视频元数据：{detail}")
     try:
         info = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise SubtitleFetchError("yt-dlp 返回的元数据不是有效 JSON。") from exc
 
+    extractor = info.get("extractor_key") or info.get("extractor")
+    source_type = _source_type_from_extractor(str(extractor or ""))
+
     return VideoMetadata(
         source_url=url,
-        source_type="youtube",
-        title=info.get("title") or "Untitled YouTube Video",
+        source_type=source_type,
+        title=info.get("title") or "Untitled Video",
         duration=info.get("duration"),
         webpage_url=info.get("webpage_url") or url,
-        extractor=info.get("extractor_key") or info.get("extractor"),
-        extra={"id": info.get("id"), "channel": info.get("channel"), "raw_info": info},
+        extractor=extractor,
+        extra={
+            "id": info.get("id"),
+            "channel": info.get("channel") or info.get("uploader"),
+            "raw_info": info,
+        },
     )
 
 
@@ -147,11 +169,33 @@ def _subtitle_language_candidates(info: dict[str, object], preferences: tuple[st
     return candidates
 
 
+def _source_type_from_extractor(extractor: str) -> str:
+    value = extractor.lower()
+    if "bilibili" in value:
+        return "bilibili"
+    if "youtube" in value:
+        return "youtube"
+    return "video"
+
+
 TIMING_RE = re.compile(
     r"(?P<start>\d{2}:\d{2}:\d{2}\.\d{3}|\d{2}:\d{2}\.\d{3})\s+-->\s+"
     r"(?P<end>\d{2}:\d{2}:\d{2}\.\d{3}|\d{2}:\d{2}\.\d{3})"
 )
 TAG_RE = re.compile(r"<[^>]+>")
+
+
+def parse_subtitle(content: str, language: str, suffix: str = "") -> list[Segment]:
+    if suffix in {".json", ".json3"}:
+        return parse_json_subtitle(content, language)
+    if suffix == ".srt":
+        return parse_srt(content, language)
+    if suffix == ".vtt" or "-->" in content:
+        return parse_vtt(content, language)
+    try:
+        return parse_json_subtitle(content, language)
+    except SubtitleFetchError:
+        return []
 
 
 def parse_vtt(content: str, language: str) -> list[Segment]:
@@ -180,6 +224,54 @@ def parse_vtt(content: str, language: str) -> list[Segment]:
             else:
                 segments.append(Segment(start=start, end=end, text=text, language=language))
         index += 1
+    return segments
+
+
+def parse_srt(content: str, language: str) -> list[Segment]:
+    segments: list[Segment] = []
+    blocks = re.split(r"\n\s*\n", content.replace("\ufeff", "").strip())
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if not lines:
+            continue
+        timing_index = next((index for index, line in enumerate(lines) if "-->" in line), None)
+        if timing_index is None:
+            continue
+        start_text, end_text = lines[timing_index].split("-->", 1)
+        text = _normalize_caption_text(" ".join(TAG_RE.sub("", line) for line in lines[timing_index + 1 :]))
+        if text:
+            segments.append(
+                Segment(
+                    start=_parse_time(start_text.strip().replace(",", ".")),
+                    end=_parse_time(end_text.strip().split()[0].replace(",", ".")),
+                    text=text,
+                    language=language,
+                )
+            )
+    return segments
+
+
+def parse_json_subtitle(content: str, language: str) -> list[Segment]:
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise SubtitleFetchError("字幕 JSON 格式异常。") from exc
+
+    body = payload.get("body") if isinstance(payload, dict) else None
+    if not isinstance(body, list):
+        return []
+
+    segments: list[Segment] = []
+    for item in body:
+        if not isinstance(item, dict):
+            continue
+        start = item.get("from", item.get("start"))
+        end = item.get("to", item.get("end"))
+        text = item.get("content") or item.get("text")
+        if isinstance(start, int | float) and isinstance(end, int | float) and isinstance(text, str):
+            cleaned_text = _normalize_caption_text(text)
+            if cleaned_text:
+                segments.append(Segment(float(start), float(end), cleaned_text, language))
     return segments
 
 

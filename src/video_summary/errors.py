@@ -2,6 +2,10 @@ class VideoSummaryError(Exception):
     """Base class for user-readable pipeline errors."""
 
 
+class ConfigurationError(VideoSummaryError):
+    """Raised when local configuration is missing or invalid."""
+
+
 class UnsupportedInputError(VideoSummaryError):
     """Raised when the input is outside the current prototype scope."""
 

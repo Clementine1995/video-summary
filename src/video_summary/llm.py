@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from urllib import error, request
 
 from .chunker import split_segments_into_chunks
@@ -63,6 +64,10 @@ def summarize_with_chunking(
     segments: list[Segment],
     llm_config: LLMConfig,
     chunking_config: ChunkingConfig,
+    cached_chunk_summaries: list[ChunkSummary] | None = None,
+    on_chunk_start: Callable[[TranscriptChunk, int, bool], None] | None = None,
+    on_chunk_done: Callable[[TranscriptChunk, int, bool, list[ChunkSummary]], None] | None = None,
+    on_chunk_error: Callable[[TranscriptChunk, int, Exception], None] | None = None,
 ) -> tuple[str, list[ChunkSummary]]:
     chunks = split_segments_into_chunks(
         segments,
@@ -72,12 +77,35 @@ def summarize_with_chunking(
     if len(chunks) <= 1:
         return summarize_with_openai_compatible(metadata, segments, llm_config), []
 
-    chunk_summaries = [
-        summarize_chunk_with_openai_compatible(metadata, chunk, len(chunks), llm_config)
-        for chunk in chunks
-    ]
+    cached_by_index = {summary.index: summary for summary in cached_chunk_summaries or []}
+    chunk_summaries: list[ChunkSummary] = []
+    for chunk in chunks:
+        cached_summary = cached_by_index.get(chunk.index)
+        if cached_summary is not None and _chunk_summary_matches(cached_summary, chunk):
+            if on_chunk_start is not None:
+                on_chunk_start(chunk, len(chunks), True)
+            chunk_summaries.append(cached_summary)
+            if on_chunk_done is not None:
+                on_chunk_done(chunk, len(chunks), True, chunk_summaries)
+            continue
+
+        if on_chunk_start is not None:
+            on_chunk_start(chunk, len(chunks), False)
+        try:
+            chunk_summaries.append(summarize_chunk_with_openai_compatible(metadata, chunk, len(chunks), llm_config))
+        except Exception as exc:
+            if on_chunk_error is not None:
+                on_chunk_error(chunk, len(chunks), exc)
+            raise
+        if on_chunk_done is not None:
+            on_chunk_done(chunk, len(chunks), False, chunk_summaries)
+
     summary = summarize_chunk_summaries_with_openai_compatible(metadata, chunk_summaries, llm_config)
     return summary, chunk_summaries
+
+
+def _chunk_summary_matches(summary: ChunkSummary, chunk: TranscriptChunk) -> bool:
+    return abs(summary.start - chunk.start) <= 5 and abs(summary.end - chunk.end) <= 5
 
 
 def summarize_chunk_with_openai_compatible(

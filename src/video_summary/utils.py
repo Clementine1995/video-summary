@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 YOUTUBE_HOST_RE = re.compile(r"(^|\.)youtube\.com$|(^|\.)youtu\.be$")
+BILIBILI_HOST_RE = re.compile(r"(^|\.)bilibili\.com$|(^|\.)b23\.tv$")
 
 
 def is_youtube_url(value: str) -> bool:
@@ -15,6 +16,17 @@ def is_youtube_url(value: str) -> bool:
 
     parsed = urlparse(value)
     return parsed.scheme in {"http", "https"} and bool(YOUTUBE_HOST_RE.search(parsed.hostname or ""))
+
+
+def is_bilibili_url(value: str) -> bool:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(BILIBILI_HOST_RE.search(parsed.hostname or ""))
+
+
+def is_supported_video_url(value: str) -> bool:
+    return is_youtube_url(value) or is_bilibili_url(value)
 
 
 def format_timestamp(seconds: float | None) -> str:

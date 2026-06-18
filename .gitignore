@@ -8,3 +8,5 @@ venv/
 env/
 outputs/
 *.egg-info/
+config.local.toml
+*.cookies.txt

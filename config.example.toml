@@ -1,0 +1,19 @@
+[llm]
+# provider 可选：deepseek、openai、openai_compatible
+provider = "deepseek"
+api_key = ""
+model = "deepseek-v4-flash"
+# deepseek/openai 可不填 base_url；openai_compatible 必须填
+# base_url = "https://api.deepseek.com"
+temperature = 0.2
+timeout = 120
+
+[asr]
+model = "small"
+language = "auto"
+device = "auto"
+compute_type = "default"
+
+[chunking]
+target_minutes = 12
+max_chars = 30000

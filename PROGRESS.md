@@ -1,6 +1,6 @@
 # video-summary 当前开发进度
 
-更新时间：2026-06-16
+更新时间：2026-06-18
 
 ## 当前状态
 
@@ -26,14 +26,49 @@
   - `chunk_summaries.md`（仅分块总结时生成）
   - `metadata.json`
 - 增加 `.gitignore`，忽略 `__pycache__`、`outputs/`、虚拟环境等本地产物。
+- 支持本地 `config.local.toml` 配置 LLM/ASR/分块参数，且该文件不会提交到 git。
+- 已验证阿里云百炼 OpenAI-compatible 配置：
+  - `base_url`: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+  - `model`: `deepseek-v4-flash`
+- ASR 音频转换支持系统 `ffmpeg`，也支持 `imageio-ffmpeg` 提供的内置 ffmpeg fallback。
+- 已用真实 YouTube 有字幕视频完成端到端导出：
+  - `https://www.youtube.com/watch?v=gN9dlisaQVM`
+  - 字幕路径成功，输出 `summary.md`、`transcript.raw.md`、`transcript.cleaned.md`、`chunk_summaries.md`、`metadata.json`。
+- 已用真实 YouTube 无字幕视频完成 ASR 端到端导出：
+  - `https://www.youtube.com/watch?v=ARMSVQU7Qj8`
+  - 字幕不可用后自动进入 ASR，使用 `faster-whisper small` 转写并成功导出。
+- 已用真实 60 分钟以上长视频验证分块总结：
+  - `https://www.youtube.com/watch?v=UuIEbpQms8o`
+  - 标题：`CS50x 2026 - Lecture 0 - Scratch`
+  - 时长：`7253` 秒，英文字幕路径成功。
+  - 默认分块生成 `10` 个 chunk，完整导出 `summary.md`、`chunk_summaries.md`、transcript 和 metadata。
+  - 实测完整运行耗时约 3 分半，分块摘要和全局汇总均成功。
+- 已增加长视频基础缓存/断点续跑：
+  - 新增 CLI 参数 `--resume`。
+  - 同标题输出目录中已有 `transcript.raw.md` 和 `transcript.cleaned.md` 时会复用，不重新下载字幕或 ASR。
+  - 已有 `chunk_summaries.md` 时会复用已完成 chunk。
+  - 每个新 chunk 总结完成后立即写回 `chunk_summaries.md`，中途失败后可继续。
+  - 已用 CS50x 2026 2 小时视频真实验证：10/10 chunk 可全部复用，续跑只重新生成全局 `summary.md`。
+- 已增加失败诊断和运行记录：
+  - 每次运行写入 `run_state.json`。
+  - 记录运行状态、开始/结束时间、当前阶段、是否 `--resume`、LLM provider/base_url/model、分块参数。
+  - 记录每个 chunk 的 `cached`、`completed` 或 `failed` 状态。
+  - 失败时记录错误类型、错误信息和失败阶段。
+  - 已验证成功路径和 LLM 401 失败路径；状态文件不保存 API key。
+- 已开始 B站支持 MVP：
+  - 支持识别 `bilibili.com` 和 `b23.tv` 链接。
+  - 元数据、字幕和音频下载复用 yt-dlp 通道。
+  - B站字幕 JSON 可解析为标准 transcript segment。
+  - 字幕不可用时复用现有音频下载、ffmpeg fallback 和 faster-whisper ASR。
+  - CLI 新增 `--cookies path\to\cookies.txt`，用于 B站登录态或受限视频。
+  - 当前环境直连 B站公开视频遇到 `HTTP Error 412`，需要用户手动提供 cookies.txt 后继续真实端到端验证。
+- 修正 ASR 清洗阶段连续短句过度合并的问题，避免长视频转写被压成过少片段，保留更细的时间戳粒度。
 
 未完成：
 
-- 真实 YouTube + LLM 完整端到端导出尚未跑通，因为当前终端尚未配置 LLM API key。
-- 真实无字幕 YouTube + ASR 路径尚未端到端验证。
-- B站支持未开始。
+- B站真实端到端导出尚未完成：当前环境需要手动导出的 B站 cookies.txt。
 - 本地文件输入未开始。
-- 真实 60 分钟以上长视频分块总结尚未端到端验证。
+- 长视频缓存/断点续跑仍可增强：最终 `summary.md` 也可缓存，或增加强制重跑某个 chunk 的参数。
 - 批处理和 Web UI 未开始。
 
 新增需求记录：
@@ -238,6 +273,14 @@ ffmpeg -version
 3. 跑通一个真实 YouTube 无字幕视频 ASR 端到端。
 4. 修正真实运行中暴露的 `yt-dlp`、字幕格式、DeepSeek 返回格式、ASR 设备兼容问题。
 5. 使用 60 分钟以上视频验证长视频分块总结。
+
+以上 1-5 已完成。下一步建议优先做：
+
+1. 增强缓存控制：
+   - 支持强制重跑全部 chunk。
+   - 支持只重跑指定 chunk。
+   - 支持复用最终 `summary.md`。
+2. 再考虑 B站支持或本地文件输入。
 
 第 3 阶段建议改动：
 

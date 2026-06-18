@@ -9,12 +9,18 @@ from .models import VideoMetadata
 from .utils import slugify, unique_dir, yt_dlp_command
 
 
-def download_youtube_audio(metadata: VideoMetadata, work_root: Path, sample_rate: int = 16000) -> Path:
+def download_video_audio(
+    metadata: VideoMetadata,
+    work_root: Path,
+    sample_rate: int = 16000,
+    yt_dlp_extra_args: list[str] | None = None,
+) -> Path:
     command_prefix = yt_dlp_command()
     if command_prefix is None:
         raise AudioExtractionError("未找到 yt-dlp，无法下载音频。请先安装 yt-dlp。")
-    if shutil.which("ffmpeg") is None:
-        raise AudioExtractionError("未找到 ffmpeg，无法转换音频。请先安装 ffmpeg 并确保它在 PATH 中。")
+    ffmpeg_location = _find_ffmpeg()
+    if ffmpeg_location is None:
+        raise AudioExtractionError("未找到 ffmpeg，无法转换音频。请先安装 ffmpeg，或运行 `python -m pip install -e \".[asr]\"`。")
 
     work_root.mkdir(parents=True, exist_ok=True)
     job_dir = unique_dir(work_root, slugify(metadata.title))
@@ -22,10 +28,13 @@ def download_youtube_audio(metadata: VideoMetadata, work_root: Path, sample_rate
     output_template = str(job_dir / "audio.%(ext)s")
     command = [
         *command_prefix,
+        *(yt_dlp_extra_args or []),
         "--no-playlist",
         "--extract-audio",
         "--audio-format",
         "wav",
+        "--ffmpeg-location",
+        ffmpeg_location,
         "--postprocessor-args",
         f"ffmpeg:-ar {sample_rate} -ac 1",
         "-o",
@@ -41,3 +50,18 @@ def download_youtube_audio(metadata: VideoMetadata, work_root: Path, sample_rate
         raise AudioExtractionError("yt-dlp 没有生成可用的 wav 音频文件。")
     metadata.audio_path = str(audio_files[0])
     return audio_files[0]
+
+
+def download_youtube_audio(metadata: VideoMetadata, work_root: Path, sample_rate: int = 16000) -> Path:
+    return download_video_audio(metadata, work_root, sample_rate)
+
+
+def _find_ffmpeg() -> str | None:
+    executable = shutil.which("ffmpeg")
+    if executable is not None:
+        return executable
+    try:
+        import imageio_ffmpeg
+    except ImportError:
+        return None
+    return imageio_ffmpeg.get_ffmpeg_exe()

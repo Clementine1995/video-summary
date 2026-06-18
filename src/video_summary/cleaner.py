@@ -11,7 +11,13 @@ FILLER_PATTERNS = [
 ]
 
 
-def clean_segments(segments: list[Segment], min_gap_to_merge: float = 1.2, min_chars: int = 24) -> list[Segment]:
+def clean_segments(
+    segments: list[Segment],
+    min_gap_to_merge: float = 1.2,
+    min_chars: int = 24,
+    max_merged_chars: int = 240,
+    max_merged_duration: float = 45,
+) -> list[Segment]:
     cleaned: list[Segment] = []
     previous_text = ""
 
@@ -22,7 +28,14 @@ def clean_segments(segments: list[Segment], min_gap_to_merge: float = 1.2, min_c
         if _is_near_duplicate(previous_text, text):
             continue
 
-        if cleaned and len(text) < min_chars and segment.start - cleaned[-1].end <= min_gap_to_merge:
+        can_merge_short_segment = (
+            cleaned
+            and len(text) < min_chars
+            and segment.start - cleaned[-1].end <= min_gap_to_merge
+            and len(cleaned[-1].text) + len(text) <= max_merged_chars
+            and segment.end - cleaned[-1].start <= max_merged_duration
+        )
+        if can_merge_short_segment:
             cleaned[-1].end = max(cleaned[-1].end, segment.end)
             cleaned[-1].text = _join_text(cleaned[-1].text, text)
         else:
