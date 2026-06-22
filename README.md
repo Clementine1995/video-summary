@@ -165,6 +165,14 @@ B站需要登录态、返回 412、会员/地区权限时，手动导出 `cookie
 python -m video_summary "https://www.bilibili.com/video/BV..." --output outputs --cookies path\to\cookies.txt
 ```
 
+也可以显式允许 `yt-dlp` 从浏览器读取登录态，省去手动导出 cookies：
+
+```powershell
+python -m video_summary "https://www.bilibili.com/video/BV..." --output outputs --cookies-from-browser edge
+```
+
+可用值通常包括 `chrome`、`edge`、`firefox`。这个选项会读取你指定浏览器的 cookie，只在你显式传参时生效；程序不会保存或打印 API key / cookie。
+
 B站已验证样例：
 
 ```powershell

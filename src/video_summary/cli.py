@@ -51,6 +51,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --resume, rerun one chunk index. Repeat to rerun multiple chunks.",
     )
     parser.add_argument("--cookies", help="Path to a yt-dlp cookies.txt file, useful for Bilibili or restricted videos.")
+    parser.add_argument(
+        "--cookies-from-browser",
+        help="Explicitly let yt-dlp read cookies from a browser profile, such as chrome, edge, or firefox.",
+    )
     parser.add_argument("--debug", action="store_true", help="Print technical traceback when a step fails.")
     return parser
 
@@ -79,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         is_local_input = not is_url_input and is_supported_local_media_file(local_input_path)
         if not (is_url_input or is_local_input):
             raise UnsupportedInputError("当前支持 YouTube、B站视频链接，以及本地音视频文件。")
-        yt_dlp_extra_args = _yt_dlp_extra_args(args.cookies)
+        yt_dlp_extra_args = _yt_dlp_extra_args(args.cookies, args.cookies_from_browser)
 
         current_stage = "metadata"
         print("1/5 读取视频元数据...")
@@ -274,10 +278,12 @@ def _fmt(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def _yt_dlp_extra_args(cookies: str | None) -> list[str]:
+def _yt_dlp_extra_args(cookies: str | None, cookies_from_browser: str | None) -> list[str]:
     args: list[str] = []
     if cookies:
         args.extend(["--cookies", cookies])
+    if cookies_from_browser:
+        args.extend(["--cookies-from-browser", cookies_from_browser])
     return args
 
 

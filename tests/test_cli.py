@@ -7,12 +7,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from video_summary.cli import main
+from video_summary.cli import _yt_dlp_extra_args, main
 from video_summary.config import ChunkingConfig, LLMConfig
 from video_summary.models import Segment, VideoMetadata
 
 
 class CLITests(unittest.TestCase):
+    def test_yt_dlp_extra_args_include_browser_cookie_option(self):
+        self.assertEqual(
+            _yt_dlp_extra_args("cookies.txt", "edge"),
+            ["--cookies", "cookies.txt", "--cookies-from-browser", "edge"],
+        )
+
     def test_reuse_summary_skips_llm_config(self):
         with TemporaryDirectory() as temp_dir:
             output_root = Path(temp_dir)
